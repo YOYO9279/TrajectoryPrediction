@@ -1,62 +1,49 @@
 import json
 from collections import defaultdict
 
+import grequests as grequests
+import numpy as np
+import pandas as pd
+import requests
 from geopy.distance import geodesic
 from pyspark.sql import SparkSession
 from sqlalchemy.orm import declarative_base
 
-from utils.com.getConfig import getConfig
+from core.getABC import mysql_con, coor_table
+# from utils.com.getConfig import getConfig
 
-conf = getConfig()
-
-class A:
-    a = 11
-
-    def geta(self):
-        print(self.a)
-
+# conf = getConfig()
 
 if __name__ == '__main__':
     #
     # spark = SparkSession.builder.appName("getABC").master("yarn").enableHiveSupport().getOrCreate()
+    # import grequests
     #
-    # df  = spark.sql("select * from spark.area02 limit 10")
+    GDPOSTURL = 'https://restapi.amap.com/v3/geocode/regeo?location={},{}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
     #
-    # df.show()
-    #
-    # for i ,row in df.toPandas().iterrows():
-    #
-    #
-    # spark.stop()
+    long = ['113.924125','113.918035','113.9231']
+    la = ['22.53724','22.53752','22.53599']
 
-    # a = np.random.randint(10, 100, size=9)
-    # a = a.reshape((3, 3))
-    #
+    req_list = [  # 请求列表
+        grequests.get(GDPOSTURL.format(long[i],la[i]) for i in range(3) )
+    ]
+
+    res_list = grequests.map(req_list)  # 并行发送，等最后一个运行完后返回
+    for i in range(3):
+        print(res_list.text)  # 打印第一个请求的响应文本
+
+    # o = np.linspace(0, 4, 9)
+    # o.resize(3, 3)
+    # a = o[0] * 0.2 + o[1] * 0.6 + o[2] * 0.2
     # print(a)
-    # print(a[0])
-    # print(a[1])
-    # print(a[2])
+    # print(a * a[0])
+    # print()
     #
-    # print(a.shape)
-    # b=np.argmax(a , axis=1)
-    # print(b)
-    # T = defaultdict(int)
-    # T[1] +=1
-    # T[2] +=1
+    # print(np.argmax(o, axis=1)
+
+
+    # title = 'python'
+    # content  = 'content'
+    # u =f"http://pushplus.hxtrip.com/send?token=017551c1d95d4f19b1fae1e13efc5e20&title={title}&content={content}&template=json"
     #
-    # print(T)
-    # a = A()
-    # a.geta()
-
-    # print(geodesic((30.28708, 120.12802999999997), (28.7427, 115.86572000000001)).m)
-    # df = spark.sql("create table spark.test as SELECT * FROM spark.spark_06051d_coor limit 10")
-    #
-    # df.show()
-    #
-    # spark.stop()
-
-
-
-
-
-    print(conf['table']['hive']['original_table'])
+    # requests.get(url = u)

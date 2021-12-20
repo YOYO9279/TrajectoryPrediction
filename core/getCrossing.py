@@ -3,19 +3,19 @@ import pandas
 import requests
 import json
 from pyspark.sql import SparkSession
-from sqlalchemy import create_engine
 from tqdm import tqdm
 
-from utils.com.getConfig import getConfig
+from conf.config import *
 from utils.db.df_insert_ignore import save_dataframe
 from utils.db.getConn import getMysqlConn
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 
-config = getConfig()
 
 
 
-# 输入 源数据
+# 输入
+# original_table
+
 
 # 输出 mysql 路口表
 # 先建好表
@@ -34,7 +34,7 @@ config = getConfig()
 
 mysql_conn = getMysqlConn()
 
-original_table = config["table"]["hive"]["original_table"]
+
 s = requests.session()
 
 GDPOSTURL = 'https://restapi.amap.com/v3/geocode/regeo?location={},{}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
@@ -73,7 +73,7 @@ if __name__ == '__main__':
 
     # 将 long la去重
     df = spark.sql(
-        f'SELECT DISTINCT map_longitude,map_latitude from spark.track  LIMIT 2000')
+        f'SELECT DISTINCT map_longitude,map_latitude from {original_table}  LIMIT 2000')
 
     filterDF = df.toPandas()
     for index, r in tqdm(filterDF.iterrows(), total=filterDF.shape[0], desc="[POST] GD API"):
