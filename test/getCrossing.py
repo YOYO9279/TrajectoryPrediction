@@ -1,11 +1,13 @@
 import time
 import pandas
+import pandas as pd
 import requests
 import json
 from pyspark.sql import SparkSession
 from tqdm import tqdm
 
 from conf.config import *
+from core import mysql_con
 from utils.db.df_insert_ignore import save_dataframe
 from utils.db.getConn import getMysqlConn
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
@@ -62,6 +64,7 @@ def getCrossing(x, y):
             print("retry")
 
 
+
 if __name__ == '__main__':
 
     spark = SparkSession.builder.appName("getCrossing").master("yarn").enableHiveSupport().getOrCreate()
@@ -71,9 +74,8 @@ if __name__ == '__main__':
     map_long_list = []
     map_lat_list = []
 
-    # 将 long la去重
     df = spark.sql(
-        f'SELECT DISTINCT map_longitude,map_latitude from {original_table}  LIMIT 2000')
+        f'SELECT DISTINCT map_longitude,map_latitude from spark.demo100 ')
 
     filterDF = df.toPandas()
     for index, r in tqdm(filterDF.iterrows(), total=filterDF.shape[0], desc="[POST] GD API"):
@@ -85,6 +87,11 @@ if __name__ == '__main__':
                      'gps_latitude': gps_lat_list}
 
     cross = pandas.DataFrame(crossing_data)
-    save_dataframe(mysql_conn, cross, config["table"]["mysql"]["coor_table"])
+    save_dataframe(mysql_conn, cross, "cross100")
+
+    df = pd.read_sql(f'select * from spark.cross100', con=mysql_con)
+    df = spark.createDataFrame(df)
+    df.write.mode("overwrite").saveAsTable("spark.cross100")
+
     spark.stop()
     print("GetCrossing Done")

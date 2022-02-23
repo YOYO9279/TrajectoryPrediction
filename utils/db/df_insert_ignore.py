@@ -11,19 +11,19 @@ def _table_column_names(conn, table: str) -> str:
     return clean_names
 
 
-def _insert_conflict_ignore(conn, df: pd.DataFrame, table: str, index: bool):
+def _insert_conflict_ignore(conn, df: pd.DataFrame, table: str):
+    conn.execute(f"alter table {table} AUTO_INCREMENT=1")
     temp_table = ''.join(random.choice(string.ascii_letters) for i in range(10))
     try:
-        df.to_sql(temp_table, conn, index=index,if_exists='replace')
-        columns = _table_column_names(conn=conn,table=temp_table)
+        df.to_sql(temp_table, conn, if_exists='replace', index=False)
+        columns = _table_column_names(conn=conn, table=temp_table)
         insert_query = f'INSERT IGNORE INTO {table}({columns}) SELECT {columns} FROM `{temp_table}`'
         conn.execute(insert_query)
     except Exception as e:
         print(e)
-
-        # drop temp table
-    drop_query = f'DROP TABLE IF EXISTS `{temp_table}`'
-    conn.execute(drop_query)
+    finally:
+        drop_query = f'DROP TABLE IF EXISTS `{temp_table}`'
+        conn.execute(drop_query)
 
 
 def save_dataframe(conn, df: pd.DataFrame, table: str):
@@ -32,4 +32,4 @@ def save_dataframe(conn, df: pd.DataFrame, table: str):
     else:
         save_index = True
 
-    _insert_conflict_ignore(conn=conn,df=df, table=table, index=save_index)
+    _insert_conflict_ignore(conn=conn, df=df, table=table)

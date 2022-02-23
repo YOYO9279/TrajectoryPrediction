@@ -2,3 +2,5 @@
 /venv/
 /.idea/
 /example.py
+*.csv
+/test/
