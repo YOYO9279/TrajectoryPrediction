@@ -1,12 +1,14 @@
 import json
 import time
 
+import grequests
 import numpy as np
 import pandas as pd
 import requests
 from geopy.distance import geodesic
 from pyspark.sql import SparkSession
 from tqdm import tqdm
+from requests.adapters import Retry, HTTPAdapter
 
 from utils.db.df_insert_ignore import save_dataframe
 from utils.db.getConn import *
@@ -34,40 +36,40 @@ def dist(a, b):
 
 def SinkCrossing():
     df = spark.sql(
-        f'SELECT DISTINCT map_longitude,map_latitude from {SOURCE_TABLE} ')
+        f'SELECT DISTINCT map_longitude,map_latitude from {SOURCE_TABLE} limit 10')
 
     df = df.toPandas()
-    gps_long_list = []
-    gps_lat_list = []
-    map_long_list = []
-    map_lat_list = []
 
     s = requests.session()
+    retries = Retry(total=30, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504], raise_on_redirect=True)
+    s.mount('https://', HTTPAdapter(max_retries=retries))
 
-    for index, r in tqdm(df.iterrows(), total=df.shape[0], desc="[POST] getCrossing"):
-        GDPOSTURL = f'https://restapi.amap.com/v3/geocode/regeo?location={r["map_longitude"]},{r["map_latitude"]}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
+    urls = [
+        f'https://restapi.amap.com/v3/geocode/regeo?location={r["map_longitude"]},{r["map_latitude"]}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
+        for index, r in df.iterrows()]
+    reqs = [grequests.get(url, session=s) for url in urls]
 
-        while True:
-            try:
-                text = s.get(GDPOSTURL).text
-                roadinters = json.loads(text)["regeocode"]["roadinters"]
-                for i in roadinters:
-                    location = str(i["location"]).split(",")
-                    map_long_list.append(float(location[0]))
-                    map_lat_list.append(float(location[1]))
-                    conver_location = gcj02_to_wgs84(float(location[0]), float(location[1]))
-                    gps_long_list.append(conver_location[0])
-                    gps_lat_list.append(conver_location[1])
-                break
-            except Exception as e:
-                time.sleep(1)
-                print("retry")
+    map_long_list = [
+        float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]) for i in
+        grequests.map(reqs)]
+
+    map_lat_list = [
+        float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[1]) for i in
+        grequests.map(reqs)]
+    gps_long_list = [
+        gcj02_to_wgs84(float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]),
+                       float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[1]))[0] for i
+        in grequests.map(reqs)]
+
+    gps_lat_list = [
+        gcj02_to_wgs84(float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]),
+                       float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[1]))[1] for i
+        in grequests.map(reqs)]
 
     crossing_data = {'map_longitude': map_long_list, 'map_latitude': map_lat_list, 'gps_longitude': gps_long_list,
                      'gps_latitude': gps_lat_list}
 
     crossing = pd.DataFrame(crossing_data)
-
     save_dataframe(mysqlConn, crossing, CROSSING_SINK_TABLE)
 
     print("SinkCrossing Done")
@@ -85,8 +87,7 @@ def SinkTransfer():
         from {SOURCE_TABLE} a
                cross join {crossingTempView} b
                           on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
-    ''').repartition(100,"car_number").cache().createOrReplaceTempView("coor_car")
-
+    ''').repartition(100, "car_number").cache().createOrReplaceTempView("coor_car")
 
     print("coor_car done")
 
@@ -214,11 +215,10 @@ def CalcAccu():
 if __name__ == '__main__':
     spark.udf.register("dist", lambda x1, y1, x2, y2: dist((x1, y1), (x2, y2)))
     # todo 修改并发 https://stackoverflow.com/questions/40417503/applying-retry-on-grequests-in-python
-    # SinkCrossing()
+    SinkCrossing()
 
     # SinkTransfer()
 
-
     # SinkAdjacent()
 
-    CalcAccu()
+    # CalcAccu()

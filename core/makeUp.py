@@ -2,10 +2,12 @@ import json
 import time
 from math import ceil
 
+import grequests
 import pandas as pd
 import requests
 from pandas import DataFrame
 from pyspark.sql import SparkSession
+from requests.adapters import HTTPAdapter, Retry
 from tqdm import tqdm
 
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
@@ -18,19 +20,20 @@ key = "30a423f69a6cb59baef9f2f55ce64c41"
 sid = 608418
 
 spark = SparkSession.builder.appName("make up").master("yarn").enableHiveSupport().getOrCreate()
+s = requests.session()
+
+retries = Retry(total=30, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504], raise_on_redirect=True)
+s.mount('https://', HTTPAdapter(max_retries=retries))
 
 
 def createTerminal(sourceTableCar):
-    for index, row in tqdm(sourceTableCar.iterrows(), total=sourceTableCar.shape[0], desc="[POST] createTerminal"):
-        url = f'https://tsapi.amap.com/v1/track/terminal/add?key={key}&sid={sid}&name={row["car_number"]}'
-        while True:
-            try:
-                response = requests.post(url)
-                print(response.text)
-                break
-            except Exception as e:
-                time.sleep(1)
-                print("createTerminal retry")
+    urls = [f'https://tsapi.amap.com/v1/track/terminal/add?key={key}&sid={sid}&name={r["car_number"]}' for index, r
+            in sourceTableCar.iterrows()]
+
+    reqs = [grequests.get(url, session=s) for url in urls]
+
+    print(reqs)
+    print("createTerminal retry")
 
 
 def uploadTrack(tid, trid, car_num):
@@ -94,14 +97,8 @@ def createuploadtrack(carDF):
 
 def createTrack(tid):
     createTrackURL = f'https://tsapi.amap.com/v1/track/trace/add?key={key}&sid={sid}&tid={tid}'
-    while True:
-        try:
-            response = requests.post(createTrackURL)
-            trid = json.loads(response.text)["data"]["trid"]
-            break
-        except Exception as e:
-            time.sleep(1)
-            print("createTrack retry")
+    resp = s.post(createTrackURL)
+    trid = json.loads(resp.text)["data"]["trid"]
     return trid
 
 
@@ -177,7 +174,6 @@ def getPoints(car_infoDF):
 
 
 if __name__ == '__main__':
-
     SOURCE_TABLE = spark.sql(f'''
         SELECT map_longitude, map_latitude, gps_time, car_number
         FROM spark.track
@@ -191,7 +187,7 @@ if __name__ == '__main__':
                               FROM spark.track) c
                         WHERE rk = 1) d
                  ) e
-                            where rl between 51 and  150
+                            where rl between 151 and  161
             ORDER BY car_number
         )
         ''').cache().createOrReplaceTempView("source")
