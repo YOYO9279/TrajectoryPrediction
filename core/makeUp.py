@@ -8,12 +8,13 @@ import requests
 from pandas import DataFrame
 from pyspark.sql import SparkSession
 from requests.adapters import HTTPAdapter, Retry
-from tqdm import tqdm
+from tqdm import trange
 
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 
 SOURCE_TABLE = "spark.track"
-SINK_TABLE = "spark.trackMakeup01"
+# SINK_TABLE = "spark.trackMakeup01"
+SINK_TABLE = "spark.gretest02"
 
 #  需先自创服务 获得sid 填入
 key = "30a423f69a6cb59baef9f2f55ce64c41"
@@ -22,18 +23,41 @@ sid = 608418
 spark = SparkSession.builder.appName("make up").master("yarn").enableHiveSupport().getOrCreate()
 s = requests.session()
 
-retries = Retry(total=30, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504], raise_on_redirect=True)
+retries = Retry(total=100, backoff_factor=1)
 s.mount('https://', HTTPAdapter(max_retries=retries))
+
+
+def concurrentQuery(reqs):
+    resps = []
+    while len(reqs) != 0:
+        resps += grequests.map(reqs, size=20)
+        reqs.clear()
+        reqs += printTimeout(resps)
+        time.sleep(0.5)
+        print("retry")
+    return resps
+
+
+
+def printTimeout(resp):
+    retryreqs = []
+    for i in resp:
+        if i.json()["errcode"] != 10000:
+            print(i.text)
+        if i.json()["errcode"] == 10021:
+            print(i.text)
+            retryreqs.append(i.request)
+    return retryreqs
 
 
 def createTerminal(sourceTableCar):
     urls = [f'https://tsapi.amap.com/v1/track/terminal/add?key={key}&sid={sid}&name={r["car_number"]}' for index, r
             in sourceTableCar.iterrows()]
 
-    reqs = [grequests.get(url, session=s) for url in urls]
+    reqs = [grequests.post(url, session=s) for url in urls]
+    concurrentQuery(reqs)
 
-    print(reqs)
-    print("createTerminal retry")
+    print("createTerminal Done")
 
 
 def uploadTrack(tid, trid, car_num):
@@ -49,6 +73,7 @@ def uploadTrack(tid, trid, car_num):
     page = ceil(df.shape[0] / 99)
     limit = 99
     offset = 99
+    reqs = []
     for i in range(page):
         d = {"key": key,
              "sid": sid,
@@ -58,39 +83,29 @@ def uploadTrack(tid, trid, car_num):
         df99 = df[(int(page) - 1) * int(offset): (int(page) - 1) * int(offset) + int(limit)]
         d["points"] = df99.to_json(orient='records')
 
-        while True:
-            try:
-                x = requests.post(url=uploadTrackURL, data=json.dumps(d), headers=headers)
-                print(x.text)
-                break
-            except Exception as e:
-                time.sleep(1)
-                print("uploadTrack retry")
+        reqs += [grequests.post(url=uploadTrackURL, session=s, data=json.dumps(d), headers=headers)]
+    concurrentQuery(reqs)
 
 
 def createuploadtrack(carDF):
-    tidList = []
-    tridList = []
-    car_numberList = []
-    for index, row in tqdm(carDF.iterrows(), total=carDF.shape[0], desc="[POST] createuploadTrack"):
-        car_number = row["car_number"]
-        inquryTrackURL = f'https://tsapi.amap.com/v1/track/terminal/list?key={key}&sid={sid}&name={car_number}'
-        while True:
-            try:
-                tid = requests.get(inquryTrackURL).json()["data"]["results"][0]["tid"]
-                break
-            except Exception as e:
-                time.sleep(1)
-                print("inquryTrack retry")
-        trid = createTrack(tid)
-        uploadTrack(tid, trid, car_number)
-        tidList.append(tid)
-        tridList.append(trid)
-        car_numberList.append(car_number)
+    urls = [f'https://tsapi.amap.com/v1/track/terminal/list?key={key}&sid={sid}&name={r["car_number"]}' for index, r in
+            carDF.iterrows()]
+    reqs = [grequests.get(url, session=s) for url in urls]
+    car_numberList = [r["car_number"] for index, r in carDF.iterrows()]
+
+    resp = concurrentQuery(reqs)
+
+    tidList = [i.json()["data"]["results"][0]["tid"] for i in resp]
+    tridList = [createTrack(i) for i in tidList]
+    for i in trange(len(tidList)):
+        uploadTrack(tidList[i], tridList[i], car_numberList[i])
+
     car_info = {"tid": tidList,
                 "trid": tridList,
                 "car_number": car_numberList}
     car_infoDF = pd.DataFrame(car_info)
+
+    print(car_infoDF)
     car_infoDF.to_csv('car_info.csv')
     return car_infoDF
 
@@ -104,23 +119,17 @@ def createTrack(tid):
 
 def getMorePoints(counts, tid, trid):
     page = ceil(counts / 999)
-
-    points = []
-    for i in range(page):
-        while True:
-            try:
-                GetMorePointURL = f"https://tsapi.amap.com/v1/track/terminal/trsearch?key={key}&sid={sid}&tid={tid}&trid={trid}&recoup=1&gap=50&pagesize=999&page={i + 1}"
-                p = requests.get(GetMorePointURL).json()["data"]["tracks"][0]["points"]
-                points += p
-                break
-            except Exception as e:
-                time.sleep(1)
-                print("GetMorePoint retry")
+    urls = [
+        f"https://tsapi.amap.com/v1/track/terminal/trsearch?key={key}&sid={sid}&tid={tid}&trid={trid}&recoup=1&gap=50&pagesize=999&page={i + 2}"
+        for i in range(page - 1)]
+    reqs = [grequests.get(url, session=s) for url in urls]
+    resp = concurrentQuery(reqs)
+    points = [j for i in resp for j in i.json()["data"]["tracks"][0]["points"]]
 
     return points
 
 
-def getPoints(car_infoDF):
+def sinkPoints(car_infoDF):
     tidL = []
     tridL = []
     car_numL = []
@@ -130,36 +139,35 @@ def getPoints(car_infoDF):
     map_longitudeL = []
     map_latitudeL = []
 
-    for index, row in tqdm(car_infoDF.iterrows(), total=car_infoDF.shape[0], desc="[GET] MakeUP Points"):
-        tid = row["tid"]
-        trid = row["trid"]
-        car_number = row["car_number"]
-        GetPointURL = f"https://tsapi.amap.com/v1/track/terminal/trsearch?key={key}&sid={sid}&tid={tid}&trid={trid}&recoup=1&gap=50&pagesize=999&page=1"
-        while True:
-            try:
-                points = []
-                resp = requests.get(GetPointURL).json()
-                points += resp["data"]["tracks"][0]["points"]
-                counts = resp["data"]["tracks"][0]["counts"]
-                if counts > 999:
-                    points += getMorePoints(counts, tid, trid)
-                j = 0
-                for i in points:
-                    loc1 = i["location"].split(",")
-                    loc2 = gcj02_to_wgs84(float(loc1[0]), float(loc1[1]))
-                    map_longitudeL.append(loc1[0])
-                    map_latitudeL.append(loc1[1])
-                    gps_longitudeL.append(loc2[0])
-                    gps_latitudeL.append(loc2[1])
-                    tidL.append(tid)
-                    tridL.append(trid)
-                    car_numL.append(car_number)
-                    gps_timeL.append(j)
-                    j += 1
-                break
-            except Exception as e:
-                time.sleep(1)
-                print("GetPoint Retry")
+    oritidL = [r['tid'] for index, r in car_infoDF.iterrows()]
+    oritridL = [r['trid'] for index, r in car_infoDF.iterrows()]
+    oricar_numL = [r['car_number'] for index, r in car_infoDF.iterrows()]
+    urls = [
+        f"https://tsapi.amap.com/v1/track/terminal/trsearch?key={key}&sid={sid}&tid={r['tid']}&trid={r['trid']}&recoup=1&gap=50&pagesize=999&page=1"
+        for index, r in car_infoDF.iterrows()]
+
+    reqs = [grequests.get(url, session=s) for url in urls]
+
+    n = 0
+    for resp in concurrentQuery(reqs):
+        points = []
+        points += resp.json()["data"]["tracks"][0]["points"]
+        counts = resp.json()["data"]["tracks"][0]["counts"]
+        if counts > 999:
+            points += getMorePoints(counts, oritidL[n], oritridL[n])
+        map_longitudeL += [float(str(i["location"]).split(",")[0]) for i in points]
+        map_latitudeL += [float(str(i["location"]).split(",")[1]) for i in points]
+        gps_longitudeL += [
+            gcj02_to_wgs84(float(str(i["location"]).split(",")[0]), float(str(i["location"]).split(",")[1]))[0] for i in
+            points]
+        gps_latitudeL += [
+            gcj02_to_wgs84(float(str(i["location"]).split(",")[0]), float(str(i["location"]).split(",")[1]))[1] for i in
+            points]
+        tidL += [oritidL[n] for x in range(len(points))]
+        tridL += [oritridL[n] for x in range(len(points))]
+        car_numL += [oricar_numL[n] for x in range(len(points))]
+        gps_timeL += [x for x in range(len(points))]
+        n = n + 1
 
     res = {"map_longitude": map_longitudeL,
            "map_latitude": map_latitudeL,
@@ -170,6 +178,7 @@ def getPoints(car_infoDF):
            "trid": tridL,
            "gps_time": gps_timeL}
     resDF = DataFrame(res).drop_duplicates(['car_number', 'map_longitude', 'map_latitude'])
+    print(resDF)
     spark.createDataFrame(resDF).write.mode("append").saveAsTable(SINK_TABLE)
 
 
@@ -177,26 +186,23 @@ if __name__ == '__main__':
     SOURCE_TABLE = spark.sql(f'''
         SELECT map_longitude, map_latitude, gps_time, car_number
         FROM spark.track
-        WHERE car_number IN (
-            select car_number
-            from (SELECT car_number,
-                         row_number() OVER ( Order by car_number) AS rl
-                  FROM (SELECT car_number
-                        FROM (SELECT car_number
-                                   , row_number() OVER (PARTITION BY car_number Order by car_number) AS rk
-                              FROM spark.track) c
-                        WHERE rk = 1) d
-                 ) e
-                            where rl between 151 and  161
-            ORDER BY car_number
-        )
-        ''').cache().createOrReplaceTempView("source")
+        WHERE car_number in (SELECT car_number
+                             from (select car_number, row_number() OVER (ORDER BY car_number) as rk
+                                   from spark.track
+                                   GROUP BY car_number
+                                  ) b
+                             where rk between 50 and 53)
+        
+        ''')
+
+    SOURCE_TABLE.cache().createOrReplaceTempView("source")
+    print(SOURCE_TABLE.count())
     sourceTableCar = spark.sql("SELECT DISTINCT car_number  from source").toPandas()
 
     createTerminal(sourceTableCar)
 
     car_infoDF = createuploadtrack(sourceTableCar)
 
-    getPoints(car_infoDF)
+    sinkPoints(car_infoDF)
 
     print("done")

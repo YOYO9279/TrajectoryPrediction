@@ -47,8 +47,9 @@ def SinkCrossing():
     urls = [
         f'https://restapi.amap.com/v3/geocode/regeo?location={r["map_longitude"]},{r["map_latitude"]}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
         for index, r in df.iterrows()]
-    reqs = [grequests.get(url, session=s) for url in urls]
 
+    print(urls)
+    reqs = [grequests.get(url, session=s) for url in urls]
     map_long_list = [
         float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]) for i in
         grequests.map(reqs)]
@@ -70,6 +71,7 @@ def SinkCrossing():
                      'gps_latitude': gps_lat_list}
 
     crossing = pd.DataFrame(crossing_data)
+    print(crossing)
     save_dataframe(mysqlConn, crossing, CROSSING_SINK_TABLE)
 
     print("SinkCrossing Done")
@@ -129,8 +131,6 @@ def CalcAccu():
     spark.createDataFrame(crossingDF).createOrReplaceTempView(CROSSING_SINK_TABLE)
     m = crossingDF.last_valid_index() + 2
     A = np.mat(np.zeros((m, m)))
-    A2 = A.dot(A)
-    A3 = A2.dot(A)
 
     Z = np.mat(np.zeros((m, m)))
 
@@ -140,29 +140,33 @@ def CalcAccu():
         cnt += row['cnt']
     A = A / cnt
 
+    A2 = A.dot(A)
+    A3 = A2.dot(A)
+
     for index, row in adjacentDF.iterrows():
         Z[int(row['cur']), int(row['next'])] = 1
         Z[int(row['next']), int(row['cur'])] = 1
-
     precurnextDF = spark.sql(
         f'''
-                select *
-                from (SELECT id                                                               as cur,
-                             lag(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre1,
-                             lag(id, 2, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre2,
-                             lag(id, 3, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre3,
-                             lead(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time) as next
-                      from (SELECT a.car_number as car_number,
-                                   a.gps_time   as gps_time,
-                                   b.id         as id
-                            from {SOURCE_TABLE} a
-                                     cross join {CROSSING_SINK_TABLE} b
-                                                on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
-                           ))
-                where cur != next
-                  and pre1 != pre2
-                  and pre2 != pre3
-                  and pre3 != cur
+       
+select *
+from (SELECT id                                                               as cur,
+             lag(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre1,
+             lag(id, 2, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre2,
+             lag(id, 3, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre3,
+             lead(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time) as next
+      from (SELECT a.car_number as car_number,
+                   a.gps_time   as gps_time,
+                   b.id         as id
+            from (select * from {SOURCE_TABLE} order by car_number limit 10000) a
+                     cross join {CROSSING_SINK_TABLE} b
+            on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
+            ) c
+     ) d
+where cur != next
+  and pre1 != pre2
+  and pre2 != pre3
+  and pre3 != cur
     ''')
     precurnextDF = precurnextDF.toPandas()
     curL = []
@@ -214,11 +218,11 @@ def CalcAccu():
 
 if __name__ == '__main__':
     spark.udf.register("dist", lambda x1, y1, x2, y2: dist((x1, y1), (x2, y2)))
-    # todo 修改并发 https://stackoverflow.com/questions/40417503/applying-retry-on-grequests-in-python
-    SinkCrossing()
+
+    # SinkCrossing()
 
     # SinkTransfer()
 
     # SinkAdjacent()
 
-    # CalcAccu()
+    CalcAccu()
