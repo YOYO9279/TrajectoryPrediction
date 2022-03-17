@@ -151,7 +151,7 @@ def PrepareData():
         Z[int(row['next']), int(row['cur'])] = 1
 
 
-def DoCalc(precurnextDF):
+def DoCalc(precurnextDF, i, a, b, c):
     curL = []
     pre1L = []
     pre2L = []
@@ -189,13 +189,14 @@ def DoCalc(precurnextDF):
            "predict": predictL
            }
 
-    pd.DataFrame(res).to_csv(
-        time.strftime("%Y%m%d_%H%M%S", time.localtime()) + '_' + str(round(Y / (Y + N) * 100, 2)) + '%' + '_' + str(
-            CROSSING_DISTANCE) + '.csv')
+    curtime = str(time.strftime("%Y%m%d_%H%M%S", time.localtime()))
+    correct = str(round(Y / (Y + N) * 100, 2)) + "%"
+    saveName = "_".join([curtime, correct, str(i), str(a), str(b), str(c)]) + ".csv"
+    pd.DataFrame(res).to_csv(saveName)
 
     print("Y:" + str(Y))
     print("N:" + str(N))
-    print("correct:" + str(round(Y / (Y + N) * 100, 2)) + "%")
+    print("correct:" + correct)
 
 
 def getPrecurnextDF(i):
@@ -244,10 +245,11 @@ def getPrecurnextDF(i):
 
 def CalcAccu():
     PrepareData()
-    for i in [20000, 40000]:
+    size = [10000]
+    a, b, c = 0.4, 0.3, 0.3
+    for i in size:
         precurnextDF = getPrecurnextDF(i)
-
-        DoCalc(precurnextDF.toPandas())
+        DoCalc(precurnextDF.toPandas(), i, a, b, c)
 
 
 if __name__ == '__main__':
