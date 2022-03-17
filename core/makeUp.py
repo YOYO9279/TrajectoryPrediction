@@ -12,9 +12,10 @@ from tqdm import trange
 
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 
+
 SOURCE_TABLE = "spark.track"
 # SINK_TABLE = "spark.trackMakeup01"
-SINK_TABLE = "spark.gretest02"
+SINK_TABLE = "spark.gretest03"
 
 #  需先自创服务 获得sid 填入
 key = "30a423f69a6cb59baef9f2f55ce64c41"
@@ -31,8 +32,7 @@ def concurrentQuery(reqs):
     resps = []
     while len(reqs) != 0:
         resps += grequests.map(reqs, size=20)
-        reqs.clear()
-        reqs += printTimeout(resps)
+        reqs = printTimeout(resps)
         time.sleep(0.5)
         print("retry")
     return resps
@@ -42,8 +42,6 @@ def concurrentQuery(reqs):
 def printTimeout(resp):
     retryreqs = []
     for i in resp:
-        if i.json()["errcode"] != 10000:
-            print(i.text)
         if i.json()["errcode"] == 10021:
             print(i.text)
             retryreqs.append(i.request)
@@ -185,14 +183,9 @@ def sinkPoints(car_infoDF):
 if __name__ == '__main__':
     SOURCE_TABLE = spark.sql(f'''
         SELECT map_longitude, map_latitude, gps_time, car_number
-        FROM spark.track
-        WHERE car_number in (SELECT car_number
-                             from (select car_number, row_number() OVER (ORDER BY car_number) as rk
-                                   from spark.track
-                                   GROUP BY car_number
-                                  ) b
-                             where rk between 50 and 53)
-        
+        FROM {SOURCE_TABLE}
+        order by car_number
+        limit 10000 
         ''')
 
     SOURCE_TABLE.cache().createOrReplaceTempView("source")
