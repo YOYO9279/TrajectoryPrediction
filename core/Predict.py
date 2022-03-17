@@ -14,7 +14,7 @@ from utils.db.df_insert_ignore import save_dataframe
 from utils.db.getConn import *
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 
-spark = SparkSession.builder.appName("getCrossing").master("yarn").enableHiveSupport().getOrCreate()
+spark = SparkSession.builder.appName("Predict").master("yarn").enableHiveSupport().getOrCreate()
 
 SOURCE_TABLE = "spark.trackMakeup01"
 
@@ -124,7 +124,10 @@ def SinkAdjacent():
     print("SinkAdjacent Done")
 
 
-def CalcAccu():
+def PrepareData():
+    global A, A2, A3
+    global Z
+
     transferDF = pd.read_sql_query(f'select * from {TRANSFER_SINK_TABLE}', con=clickhouseConn)
     crossingDF = pd.read_sql_query(f'select * from {CROSSING_SINK_TABLE}', con=mysqlConn)
     adjacentDF = pd.read_sql_query(f'select * from {ADJACENT_SINK_TABLE}', con=clickhouseConn)
@@ -146,29 +149,9 @@ def CalcAccu():
     for index, row in adjacentDF.iterrows():
         Z[int(row['cur']), int(row['next'])] = 1
         Z[int(row['next']), int(row['cur'])] = 1
-    precurnextDF = spark.sql(
-        f'''
-       
-select *
-from (SELECT id                                                               as cur,
-             lag(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre1,
-             lag(id, 2, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre2,
-             lag(id, 3, -1) over (PARTITION BY car_number ORDER BY gps_time)  as pre3,
-             lead(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time) as next
-      from (SELECT a.car_number as car_number,
-                   a.gps_time   as gps_time,
-                   b.id         as id
-            from (select * from {SOURCE_TABLE} order by car_number limit 10000) a
-                     cross join {CROSSING_SINK_TABLE} b
-            on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
-            ) c
-     ) d
-where cur != next
-  and pre1 != pre2
-  and pre2 != pre3
-  and pre3 != cur
-    ''')
-    precurnextDF = precurnextDF.toPandas()
+
+
+def DoCalc(precurnextDF):
     curL = []
     pre1L = []
     pre2L = []
@@ -185,8 +168,7 @@ where cur != next
 
         predict = np.argmax(S, axis=1)
 
-        if int(row['pre1']) != -1 and int(row['pre2']) != -1 and int(row['pre3']) != -1 and int(
-                row['next']) != -1 and int(predict[0]) != 0:
+        if int(predict[0]) != 0:
             pre1L.append(int(row['pre1']))
             pre2L.append(int(row['pre2']))
             pre3L.append(int(row['pre3']))
@@ -214,6 +196,58 @@ where cur != next
     print("Y:" + str(Y))
     print("N:" + str(N))
     print("correct:" + str(round(Y / (Y + N) * 100, 2)) + "%")
+
+
+def getPrecurnextDF(i):
+    spark.sql(f"""
+
+                SELECT a.car_number as car_number,
+                            a.gps_time   as gps_time,
+                           b.id         as id
+                    from (select * from {SOURCE_TABLE} order by car_number limit {i}) a
+                             cross join {CROSSING_SINK_TABLE} b
+                   on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
+    """).createOrReplaceTempView("tt")
+
+    precurnextDF = spark.sql(
+        f'''
+            SELECT *
+            FROM
+              (SELECT id AS cur,
+                      lag(id, 1, -1) over (PARTITION BY car_number
+                                           ORDER BY gps_time) AS pre1,
+                      lag(id, 2, -1) over (PARTITION BY car_number
+                                           ORDER BY gps_time) AS pre2,
+                      lag(id, 3, -1) over (PARTITION BY car_number
+                                           ORDER BY gps_time) AS pre3,
+                      lead(id, 1, -1) over (PARTITION BY car_number
+                                            ORDER BY gps_time) AS next
+               FROM
+                 (SELECT id,
+                         car_number,
+                         gps_time
+                  FROM
+                    (SELECT lag(id, 1, -1) over (PARTITION BY car_number
+                                                 ORDER BY gps_time) AS p1,
+                            id,
+                            car_number,
+                            gps_time
+                     FROM tt) c
+                  WHERE p1!=id ) d)e
+            WHERE pre1!=-1
+              AND pre2!=-1
+              AND pre3!=-1
+              AND next!=-1
+    ''')
+    return precurnextDF
+
+
+def CalcAccu():
+    PrepareData()
+    for i in [20000, 40000]:
+        precurnextDF = getPrecurnextDF(i)
+
+        DoCalc(precurnextDF.toPandas())
 
 
 if __name__ == '__main__':
