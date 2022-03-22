@@ -12,9 +12,14 @@ from tqdm import trange
 
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 
+# todo
+# import grequests_throttle as gt
+#
+# ret = gt.map(requests, rate=rate)
+# print(ret)
 
 SOURCE_TABLE = "spark.track"
-# SINK_TABLE = "spark.trackMakeup01"
+# SINK_TABLE = "spark.trackMakeup01"AIwireless@215
 SINK_TABLE = "spark.gretest03"
 
 #  需先自创服务 获得sid 填入

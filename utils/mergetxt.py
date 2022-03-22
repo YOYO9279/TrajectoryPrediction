@@ -1,15 +1,16 @@
 import os
-from urllib.parse import  unquote
+from urllib.parse import unquote
 
-filePath = "/root/data/track/2018/10/08/"
+from tqdm import tqdm
+
+filePath = "/root/data/track/2018/10/10/"
 # filePath = "C:\\Users\\YOYO\\Downloads\\track\\2019\\07\\02\\"
 
 list_data = os.listdir(filePath)
 
+k = open('/root/data/res/20181010.txt', 'w+')
 
-k = open('./res.txt', 'w+')
-
-for i in list_data:
+for i in tqdm(list_data):
     length = len(i)
     append = ''
     if length < 19:
@@ -17,10 +18,10 @@ for i in list_data:
         province = unquote(str(i[2:9]), encoding="GB2312")
         car_number = str(i[9:14])
         append = ':{}:{}:{}\n'.format(color, province, car_number)
-    else :
+    else:
         color = str(i[0:1])
         province = unquote(str(i[2:9]), encoding="GB2312")
-        car_number = str(i[9:13])+unquote(str(i[13:-4]), encoding="GB2312")
+        car_number = str(i[9:13]) + unquote(str(i[13:-4]), encoding="GB2312")
         append = ':{}:{}:{}\n'.format(color, province, car_number)
     # print(append)
     with open(filePath + i, 'r', encoding="utf-8") as f:

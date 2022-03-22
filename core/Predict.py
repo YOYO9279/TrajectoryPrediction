@@ -246,7 +246,7 @@ def getPrecurnextDF(i):
 def CalcAccu():
     PrepareData()
     size = [10000]
-    a, b, c = 0.4, 0.3, 0.3
+    a, b, c = 0.5, 0.3, 0.2
     for i in size:
         precurnextDF = getPrecurnextDF(i)
         DoCalc(precurnextDF.toPandas(), i, a, b, c)
