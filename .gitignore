@@ -1,6 +1,5 @@
 # Project exclude paths
 /venv/
 /.idea/
-/example.py
-*.csv
 /test/
+/res/
