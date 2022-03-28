@@ -33,7 +33,6 @@ sid = 608418
 spark = SparkSession.builder.appName("make up").master("yarn").enableHiveSupport().getOrCreate()
 s = requests.session()
 
-
 retries = Retry(total=100, backoff_factor=1)
 s.mount('https://', HTTPAdapter(max_retries=retries))
 
@@ -94,7 +93,9 @@ def createuploadtrack(carDF):
     car_infoDF = pd.DataFrame(car_info)
 
     print(car_infoDF)
-    car_infoDF.to_csv('car_info.csv')
+    curtime = str(time.strftime("%Y%m%d_%H%M%S", time.localtime()))
+    saveName = "_".join([curtime, car_numberList.count()]) + ".csv"
+    car_infoDF.to_csv("../res/carInfo/" + saveName)
     return car_infoDF
 
 
