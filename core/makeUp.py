@@ -9,18 +9,22 @@ from pandas import DataFrame
 from pyspark.sql import SparkSession
 from requests.adapters import HTTPAdapter, Retry
 from tqdm import trange
-
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
+import grequests_throttle as gt
 
-# todo
-# import grequests_throttle as gt
-#
-# ret = gt.map(requests, rate=rate)
-# print(ret)
+
+def concurQ(reqs):
+    resp = gt.map(reqs, rate=50)
+    for i in resp:
+        try:
+            print(i.text)
+        except Exception as e:
+            print(e)
+    return resp
+
 
 SOURCE_TABLE = "spark.track"
-# SINK_TABLE = "spark.trackMakeup01"AIwireless@215
-SINK_TABLE = "spark.gretest03"
+SINK_TABLE = "spark.gretest05"
 
 #  需先自创服务 获得sid 填入
 key = "30a423f69a6cb59baef9f2f55ce64c41"
@@ -29,28 +33,9 @@ sid = 608418
 spark = SparkSession.builder.appName("make up").master("yarn").enableHiveSupport().getOrCreate()
 s = requests.session()
 
+
 retries = Retry(total=100, backoff_factor=1)
 s.mount('https://', HTTPAdapter(max_retries=retries))
-
-
-def concurrentQuery(reqs):
-    resps = []
-    while len(reqs) != 0:
-        resps += grequests.map(reqs, size=20)
-        reqs = printTimeout(resps)
-        time.sleep(0.5)
-        print("retry")
-    return resps
-
-
-
-def printTimeout(resp):
-    retryreqs = []
-    for i in resp:
-        if i.json()["errcode"] == 10021:
-            print(i.text)
-            retryreqs.append(i.request)
-    return retryreqs
 
 
 def createTerminal(sourceTableCar):
@@ -58,7 +43,7 @@ def createTerminal(sourceTableCar):
             in sourceTableCar.iterrows()]
 
     reqs = [grequests.post(url, session=s) for url in urls]
-    concurrentQuery(reqs)
+    concurQ(reqs)
 
     print("createTerminal Done")
 
@@ -87,7 +72,7 @@ def uploadTrack(tid, trid, car_num):
         d["points"] = df99.to_json(orient='records')
 
         reqs += [grequests.post(url=uploadTrackURL, session=s, data=json.dumps(d), headers=headers)]
-    concurrentQuery(reqs)
+    concurQ(reqs)
 
 
 def createuploadtrack(carDF):
@@ -96,7 +81,7 @@ def createuploadtrack(carDF):
     reqs = [grequests.get(url, session=s) for url in urls]
     car_numberList = [r["car_number"] for index, r in carDF.iterrows()]
 
-    resp = concurrentQuery(reqs)
+    resp = concurQ(reqs)
 
     tidList = [i.json()["data"]["results"][0]["tid"] for i in resp]
     tridList = [createTrack(i) for i in tidList]
@@ -126,7 +111,7 @@ def getMorePoints(counts, tid, trid):
         f"https://tsapi.amap.com/v1/track/terminal/trsearch?key={key}&sid={sid}&tid={tid}&trid={trid}&recoup=1&gap=50&pagesize=999&page={i + 2}"
         for i in range(page - 1)]
     reqs = [grequests.get(url, session=s) for url in urls]
-    resp = concurrentQuery(reqs)
+    resp = concurQ(reqs)
     points = [j for i in resp for j in i.json()["data"]["tracks"][0]["points"]]
 
     return points
@@ -152,7 +137,7 @@ def sinkPoints(car_infoDF):
     reqs = [grequests.get(url, session=s) for url in urls]
 
     n = 0
-    for resp in concurrentQuery(reqs):
+    for resp in concurQ(reqs):
         points = []
         points += resp.json()["data"]["tracks"][0]["points"]
         counts = resp.json()["data"]["tracks"][0]["counts"]
@@ -190,12 +175,14 @@ if __name__ == '__main__':
         SELECT map_longitude, map_latitude, gps_time, car_number
         FROM {SOURCE_TABLE}
         order by car_number
-        limit 10000 
+        limit 100000
         ''')
 
     SOURCE_TABLE.cache().createOrReplaceTempView("source")
     print(SOURCE_TABLE.count())
     sourceTableCar = spark.sql("SELECT DISTINCT car_number  from source").toPandas()
+
+    print(sourceTableCar)
 
     createTerminal(sourceTableCar)
 

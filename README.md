@@ -1,106 +1,128 @@
-### original 转换语句
-```sql
-
-
-insert overwrite table track partition (dt = '2018-10-08')
-select cast(map_longitude / 600000 as decimal(10, 8)) as map_log,
-       cast(map_latitude / 600000 as decimal(10, 8))  as map_la,
-       unix_timestamp(
-               concat(concat_ws('-', substr(gps_time, 1, 4), substr(gps_time, 5, 2), substr(gps_time, 7, 2)), ' ',
-                      concat_ws(':', substr(gps_time, 10, 2), substr(gps_time, 12, 2), substr(gps_time, 14, 2)))),
-       gps_speed,
-       direction,
-       event,
-       alarm_code,
-       cast(gps_longitude / 600000 as decimal(10, 8)),
-       cast(gps_latitude / 600000 as decimal(10, 8)),
-       altitude,
-       tachometer_speed,
-       miles,
-       error_type,
-       access_code,
-       unix_timestamp(concat(
-               concat_ws('-', substr(receiving_time, 1, 4), substr(receiving_time, 5, 2), substr(receiving_time, 7, 2)),
-               ' ', concat_ws(':', substr(receiving_time, 10, 2), substr(receiving_time, 12, 2),
-                              substr(receiving_time, 14, 2)))),
-       color,
-       province,
-       car_number
-from original;
+### original to ods 洗数据+去重
+```hiveql
+insert into table ods_track partition (dt)
+select map_longitude, map_latitude, gps_time, gps_speed, direction, event, alarm_code, gps_longitude, gps_latitude, altitude, tachometer_speed, miles, error_type, access_code, receiving_time, color, province, car_number,dt
+from (select cast(map_longitude / 600000 as double)          as map_longitude,
+             cast(map_latitude / 600000 as double)           as map_latitude,
+             unix_timestamp(
+                     concat(concat_ws('-', substr(gps_time, 1, 4), substr(gps_time, 5, 2), substr(gps_time, 7, 2)), ' ',
+                            concat_ws(':', substr(gps_time, 10, 2), substr(gps_time, 12, 2),
+                                      substr(gps_time, 14, 2))))     as gps_time,
+             gps_speed,
+             direction,
+             event,
+             nvl(alarm_code, 0) as alarm_code,
+             cast(gps_longitude / 600000 as double)          as gps_longitude,
+             cast(gps_latitude / 600000 as double)           as gps_latitude,
+             altitude,
+             tachometer_speed,
+             miles,
+             error_type,
+             access_code,
+             unix_timestamp(concat(
+                     concat_ws('-', substr(receiving_time, 1, 4), substr(receiving_time, 5, 2),
+                               substr(receiving_time, 7, 2)),
+                     ' ', concat_ws(':', substr(receiving_time, 10, 2), substr(receiving_time, 12, 2),
+                                    substr(receiving_time, 14, 2)))) as receiving_time,
+             color,
+             province,
+             car_number,
+             dt,
+             row_number() over (partition by car_number,map_longitude,map_latitude order by  gps_time) as rk
+      from spark.ori2) a
+where rk = 1 ;
 ```
 
 ### track数据
-```sql
-
-CREATE TABLE track
+```hiveql
+CREATE TABLE ods_track
 (
-    map_longitude       Double,
-    map_latitude        Double,
-    GPS_time            bigint,
-    GPS_speed           String,
-    direction           String,
-    event               String,
-    alarm_code          String,
-    GPS_longitude       Double,
-    GPS_latitude        Double,
-    altitude            String,
-    tachometer_speed    String,
-    miles               String,
-    error_type          String,
-    access_code         String,
-    receiving_time      bigint,
-    color               String,
-    province            String,
-    car_number          String,
-    dt                  String
+    map_longitude    Double,
+    map_latitude     Double,
+    gps_time         BIGINT,
+    gps_speed        int,
+    direction        int,
+    event            int,
+    alarm_code       int,
+    gps_longitude    Double,
+    gps_latitude     Double,
+    altitude         int,
+    tachometer_speed int,
+    miles            int,
+    error_type       int,
+    access_code      int,
+    receiving_time   BIGINT,
+    color            int,
+    province         String,
+    car_number       String
 )
-row format delimited fields terminated by ',';
+partitioned by (dt STRING)
+row format delimited fields terminated by ':';
+
+
 ```
 
 
 
 ### coor建表语句
 
-```sql
-create table spark.coor_01
+```clickhouse
+drop table transfer
+create table transfer
 (
-    id            int auto_increment
-        primary key,
-    map_longitude double null,
-    map_latitude  double null,
-    gps_longitude double null,
-    gps_latitude  double null,
-    constraint `map_longitude_map_latitude_uindex`
-        unique (map_longitude, map_latitude)
-);
+    from_id Float64,
+    to_id   Float64,
+    cnt     Float64
+) engine = SummingMergeTree(cnt)
+      order by (from_id, to_id);
 ```
 
 ### ADJ建表语句
-```sql
+```clickhouse
 
-create table spark.adj_02
+drop table adjacent
+create table adjacent
 (
-    a_id            bigint null,
-    a_map_longitude double null,
-    a_map_latitude  double null,
-    a_gps_longitude double null,
-    a_gps_latitude  double null,
-    b_id            bigint null,
-    b_map_longitude double null,
-    b_map_latitude  double null,
-    b_gps_longitude double null,
-    b_gps_latitude  double null,
-    isAdj           text   null,
-    constraint adj_uindex
-        unique (a_id, b_id)
-);
-
-
+    cur  Float64,
+    next Float64
+) engine = ReplacingMergeTree()
+      order by (cur, next)
 
 ```
 
+### ck原表数据
+```clickhouse
 
+create table kafka_ck_source_track
+(
+    map_longitude    Float64,
+    map_latitude     Float64,
+    gps_time         Int64,
+    gps_speed        Int8,
+    direction        Int8,
+    event            Int8,
+    alarm_code       Int8,
+    gps_longitude    Float64,
+    gps_latitude     Float64,
+    altitude         Int8,
+    tachometer_speed Int8,
+    miles            Int8,
+    error_type       Int8,
+    access_code      Int8,
+    receiving_time   Int64,
+    color            Int8,
+    province         String,
+    car_number       String
+) engine = Kafka SETTINGS kafka_broker_list = 'node01:9092,node02:9092,node03:9092',
+    kafka_topic_list = 'kafka_track_test01',
+    kafka_group_name = 'group2',
+    kafka_format = 'CSV',
+    kafka_num_consumers = 4;
+```
 
-
-
+### ck 物化视图
+```clickhouse
+CREATE MATERIALIZED VIEW kafka_ck_mid_track TO kafka_ck_sink_track
+    AS SELECT map_longitude, map_latitude, fromUnixTimestamp(gps_time) as gps_time, gps_speed, direction, event, alarm_code, gps_longitude, gps_latitude, altitude, tachometer_speed, miles, error_type, access_code, fromUnixTimestamp(receiving_time) as receiving_time, color, province, car_number
+    FROM kafka_ck_source_track;
 ```
