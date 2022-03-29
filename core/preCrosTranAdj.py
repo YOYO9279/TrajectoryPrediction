@@ -2,27 +2,19 @@ import json
 
 import grequests
 import pandas as pd
-import requests
 from geopy.distance import geodesic
 from pyspark.sql import SparkSession
-from requests.adapters import Retry, HTTPAdapter
 from utils.db.df_insert_ignore import save_dataframe
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 from etc.config import *
 import grequests_throttle as gt
 
 
-
-
-def SinkCrossing():
+def sinkCrossing():
     df = spark.sql(
         f'SELECT DISTINCT map_longitude,map_latitude from {SOURCE_TABLE} limit 10')
 
     df = df.toPandas()
-
-    s = requests.session()
-    retries = Retry(total=30, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504], raise_on_redirect=True)
-    s.mount('https://', HTTPAdapter(max_retries=retries))
 
     urls = [
         f'https://restapi.amap.com/v3/geocode/regeo?location={r["map_longitude"]},{r["map_latitude"]}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
@@ -104,15 +96,12 @@ def SinkAdjacent():
     print("SinkAdjacent Done")
 
 
-
 if __name__ == '__main__':
-
     spark = SparkSession.builder.appName("preCrosTranAdj").master("yarn").enableHiveSupport().getOrCreate()
     spark.udf.register("dist", lambda x1, y1, x2, y2: geodesic((x1, y1), (x2, y2)).m)
 
-    SinkCrossing()
+    sinkCrossing()
 
     SinkTransfer()
 
     SinkAdjacent()
-
