@@ -78,8 +78,8 @@ def create_track(tidList):
 if __name__ == '__main__':
     spark = SparkSession.builder.appName("upload Point").master("yarn").enableHiveSupport().getOrCreate()
 
-    step = 10000000
-    start = 1110000
+    step = 500000
+    start = 1
     stop = 108465083
     for i in range(start, stop, step):
         sourceDF = spark.sql(f'''

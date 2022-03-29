@@ -50,16 +50,16 @@ def sinkCrossing():
 
 
 def SinkTransfer():
-    crossingTempView = "crossingTempView"
+    CROSSING_TEMP_VIEW = "CROSSINGTEMPVIEW"
 
     df = pd.read_sql_query(f'select * from {CROSSING_SINK_TABLE}', con=mysqlConn)
-    spark.createDataFrame(df).createOrReplaceTempView(crossingTempView)
+    spark.createDataFrame(df).createOrReplaceTempView(CROSSING_TEMP_VIEW)
     spark.sql(f'''
     select   a.car_number as car_number,
              a.gps_time   as gps_time,
              b.id         as id
         from {SOURCE_TABLE} a
-               cross join {crossingTempView} b
+               cross join {CROSSING_TEMP_VIEW} b
                           on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
     ''').repartition(100, "car_number").cache().createOrReplaceTempView("coor_car")
 

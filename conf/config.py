@@ -16,7 +16,7 @@ CARINFO_TABLE = "carinfo"
 CROSSING_DISTANCE = 20
 
 s = requests.session()
-retries = Retry(total=100, backoff_factor=1)
+retries = Retry(total=10, backoff_factor=0.1)
 s.mount('https://', HTTPAdapter(max_retries=retries))
 
 
