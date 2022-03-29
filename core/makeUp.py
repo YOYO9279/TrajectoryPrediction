@@ -83,7 +83,7 @@ if __name__ == '__main__':
     SOURCE_TABLE = spark.sql(f'''
         SELECT map_longitude, map_latitude, gps_time, car_number
         FROM {SOURCE_TABLE}
-        WHERE dt = '2018-10-08' AND rk BETWEEN 1 AND 10000
+        WHERE dt = '2018-10-08' AND rk BETWEEN 1 AND 1000000
         ''')
 
     SOURCE_TABLE.cache().createOrReplaceTempView("source")
