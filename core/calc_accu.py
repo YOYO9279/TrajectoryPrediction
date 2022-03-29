@@ -5,7 +5,7 @@ from geopy.distance import geodesic
 from pyspark.sql import SparkSession
 from tqdm import tqdm
 
-from etc.config import *
+from conf.config import *
 
 
 def PrepareData():

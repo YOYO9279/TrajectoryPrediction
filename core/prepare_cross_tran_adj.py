@@ -6,7 +6,7 @@ from geopy.distance import geodesic
 from pyspark.sql import SparkSession
 from utils.db.df_insert_ignore import save_dataframe
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
-from etc.config import *
+from conf.config import *
 import grequests_throttle as gt
 
 

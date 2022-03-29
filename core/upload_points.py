@@ -4,11 +4,12 @@ import grequests
 import pandas as pd
 from pyspark.sql import SparkSession
 from tqdm import trange
-from etc.config import *
-from utils.req.concurQ import concurQ
+from conf.config import *
+from utils.db.df_insert_ignore import save_dataframe
+from utils.req.concur_request import concurQ
 
 
-def createTerminal(sourceTableCar):
+def create_terminal(sourceTableCar):
     urls = [f'https://tsapi.amap.com/v1/track/terminal/add?key={key}&sid={sid}&name={r["car_number"]}' for index, r
             in sourceTableCar.iterrows()]
 
@@ -18,7 +19,7 @@ def createTerminal(sourceTableCar):
     print("createTerminal Done")
 
 
-def uploadTrack(tid, trid, car_num):
+def upload_track(tid, trid, car_num):
     headers = {"Content-Type": "application/json"}
     uploadTrackURL = f"https://tsapi.amap.com/v1/track/point/upload?key={key}"
 
@@ -45,7 +46,7 @@ def uploadTrack(tid, trid, car_num):
     concurQ(reqs)
 
 
-def createuploadTrack(carDF):
+def create_upload_track(carDF):
     urls = [f'https://tsapi.amap.com/v1/track/terminal/list?key={key}&sid={sid}&name={r["car_number"]}' for index, r in
             carDF.iterrows()]
     reqs = [grequests.get(url, session=s) for url in urls]
@@ -54,22 +55,19 @@ def createuploadTrack(carDF):
     resp = concurQ(reqs)
 
     tidList = [i.json()["data"]["results"][0]["tid"] for i in resp]
-    tridList = createTrack(tidList)
+    tridList = create_track(tidList)
     for i in trange(len(tidList)):
-        uploadTrack(tidList[i], tridList[i], car_numberList[i])
+        upload_track(tidList[i], tridList[i], car_numberList[i])
 
     car_info = {"tid": tidList,
                 "trid": tridList,
                 "car_number": car_numberList}
     car_infoDF = pd.DataFrame(car_info)
 
-    try:
-        car_infoDF.to_sql(CARINFO_TABLE, mysqlConn, if_exists="append", index=False)
-    except Exception as e:
-        print(e)
+    save_dataframe(mysqlConn, car_infoDF, CARINFO_TABLE)
 
 
-def createTrack(tidList):
+def create_track(tidList):
     urls = [f'https://tsapi.amap.com/v1/track/trace/add?key={key}&sid={sid}&tid={tid}' for tid in tidList]
     reqs = [grequests.post(url, session=s) for url in urls]
     resp = concurQ(reqs)
@@ -78,22 +76,26 @@ def createTrack(tidList):
 
 
 if __name__ == '__main__':
-    spark = SparkSession.builder.appName("make up").master("yarn").enableHiveSupport().getOrCreate()
+    spark = SparkSession.builder.appName("upload Point").master("yarn").enableHiveSupport().getOrCreate()
 
-    SOURCE_TABLE = spark.sql(f'''
-        SELECT map_longitude, map_latitude, gps_time, car_number
-        FROM {SOURCE_TABLE}
-        WHERE dt = '2018-10-08' AND rk BETWEEN 1 AND 1000000
-        ''')
+    step = 10000000
+    start = 1110000
+    stop = 108465083
+    for i in range(start, stop, step):
+        sourceDF = spark.sql(f'''
+            SELECT map_longitude, map_latitude, gps_time, car_number
+            FROM {SOURCE_TABLE}
+            WHERE dt = '2018-10-08' AND rk BETWEEN {i} AND {i + step}
+            ''')
 
-    SOURCE_TABLE.cache().createOrReplaceTempView("source")
-    print(SOURCE_TABLE.count())
-    sourceTableCar = spark.sql("SELECT DISTINCT car_number  from source").toPandas()
+        sourceDF.cache().createOrReplaceTempView("source")
+        print(sourceDF.count())
+        sourceTableCar = spark.sql("SELECT DISTINCT car_number  from source").toPandas()
 
-    print(sourceTableCar)
+        print(sourceTableCar)
 
-    createTerminal(sourceTableCar)
+        create_terminal(sourceTableCar)
 
-    createuploadTrack(sourceTableCar)
+        create_upload_track(sourceTableCar)
 
-    print("done")
+        print(f" {i + step} upload over")

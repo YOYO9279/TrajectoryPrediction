@@ -1,7 +1,7 @@
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
-from utils.db.getConn import getClickhouseConn, getMysqlConn
+from utils.db.get_conn import getClickhouseConn, getMysqlConn
 
 SOURCE_TABLE = "spark.ods_track_rk"
 

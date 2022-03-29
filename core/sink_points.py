@@ -5,9 +5,9 @@ import pandas as pd
 from pandas import DataFrame
 from pyspark.sql import SparkSession
 
-from etc.config import *
+from conf.config import *
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
-from utils.req.concurQ import concurQ
+from utils.req.concur_request import concurQ
 
 SINK_TABLE = "spark.ods_track_makeup"
 
