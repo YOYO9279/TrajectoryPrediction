@@ -9,6 +9,9 @@ from pandas import DataFrame
 from pyspark.sql import SparkSession
 from requests.adapters import HTTPAdapter, Retry
 from tqdm import trange
+
+from etc.config import mysqlConn, CARINFO_TABLE
+from utils.db.df_insert_ignore import save_dataframe
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 import grequests_throttle as gt
 
@@ -23,9 +26,8 @@ def concurQ(reqs):
     return resp
 
 
-SOURCE_TABLE = "spark.track"
-SINK_TABLE = "spark.gretest05"
-
+SOURCE_TABLE = "spark.ods_track_"
+# SINK_TABLE = "spark.gretest05"
 #  需先自创服务 获得sid 填入
 key = "30a423f69a6cb59baef9f2f55ce64c41"
 sid = 608418
@@ -92,11 +94,7 @@ def createuploadtrack(carDF):
                 "car_number": car_numberList}
     car_infoDF = pd.DataFrame(car_info)
 
-    print(car_infoDF)
-    curtime = str(time.strftime("%Y%m%d_%H%M%S", time.localtime()))
-    saveName = "_".join([curtime, car_numberList.count()]) + ".csv"
-    car_infoDF.to_csv("../res/carInfo/" + saveName)
-    return car_infoDF
+    save_dataframe(mysqlConn, car_infoDF, CARINFO_TABLE)
 
 
 def createTrack(tid):
@@ -118,7 +116,10 @@ def getMorePoints(counts, tid, trid):
     return points
 
 
-def sinkPoints(car_infoDF):
+def sinkPoints():
+
+    car_infoDF = pd.read_sql_query(f'select * from {CARINFO_TABLE}', con=mysqlConn)
+
     tidL = []
     tridL = []
     car_numL = []
@@ -176,7 +177,7 @@ if __name__ == '__main__':
         SELECT map_longitude, map_latitude, gps_time, car_number
         FROM {SOURCE_TABLE}
         order by car_number
-        limit 100000
+        limit 10000
         ''')
 
     SOURCE_TABLE.cache().createOrReplaceTempView("source")
@@ -187,8 +188,8 @@ if __name__ == '__main__':
 
     createTerminal(sourceTableCar)
 
-    car_infoDF = createuploadtrack(sourceTableCar)
+    createuploadtrack(sourceTableCar)
 
-    sinkPoints(car_infoDF)
+    # sinkPoints()
 
     print("done")

@@ -5,6 +5,7 @@ SOURCE_TABLE = "spark.trackMakeup01"
 CROSSING_SINK_TABLE = "crossing"
 TRANSFER_SINK_TABLE = "transfer"
 ADJACENT_SINK_TABLE = "adjacent"
+CARINFO_TABLE = "car_info"
 
 CROSSING_DISTANCE = 20
 
