@@ -10,44 +10,6 @@ from conf.config import *
 import grequests_throttle as gt
 
 
-def sinkCrossing():
-    df = spark.sql(
-        f'SELECT DISTINCT map_longitude,map_latitude from {SOURCE_TABLE} limit 10')
-
-    df = df.toPandas()
-
-    urls = [
-        f'https://restapi.amap.com/v3/geocode/regeo?location={r["map_longitude"]},{r["map_latitude"]}&key=30a423f69a6cb59baef9f2f55ce64c41&radius=3000&extensions=all'
-        for index, r in df.iterrows()]
-
-    print(urls)
-    reqs = [grequests.get(url, session=s) for url in urls]
-    map_long_list = [
-        float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]) for i in
-        gt.map(reqs, rate=50)]
-
-    map_lat_list = [
-        float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[1]) for i in
-        gt.map(reqs, rate=50)]
-    gps_long_list = [
-        gcj02_to_wgs84(float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]),
-                       float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[1]))[0] for i
-        in gt.map(reqs, rate=50)]
-
-    gps_lat_list = [
-        gcj02_to_wgs84(float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[0]),
-                       float(str(json.loads(i.text)["regeocode"]["roadinters"][0]["location"]).split(",")[1]))[1] for i
-        in gt.map(reqs, rate=50)]
-
-    crossing_data = {'map_longitude': map_long_list, 'map_latitude': map_lat_list, 'gps_longitude': gps_long_list,
-                     'gps_latitude': gps_lat_list}
-
-    crossing = pd.DataFrame(crossing_data)
-    print(crossing)
-    save_dataframe(mysqlConn, crossing, CROSSING_SINK_TABLE)
-
-    print("SinkCrossing Done")
-
 
 def SinkTransfer():
     CROSSING_TEMP_VIEW = "CROSSINGTEMPVIEW"
@@ -97,10 +59,9 @@ def SinkAdjacent():
 
 
 if __name__ == '__main__':
-    spark = SparkSession.builder.appName("preCrosTranAdj").master("yarn").enableHiveSupport().getOrCreate()
+    spark = SparkSession.builder.appName("get TranAdj").master("yarn").enableHiveSupport().getOrCreate()
     spark.udf.register("dist", lambda x1, y1, x2, y2: geodesic((x1, y1), (x2, y2)).m)
 
-    sinkCrossing()
 
     SinkTransfer()
 

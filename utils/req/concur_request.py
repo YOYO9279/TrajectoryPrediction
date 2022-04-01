@@ -11,14 +11,19 @@ def checkResend(resp):
     goodresp = []
     method = resp[0].request.method
     for i in resp:
-        errcode = i.json()["errcode"]
-        if errcode == 10021:
-            print(i.text)
-            errurls.append(i.url)
-        if errcode == 10000:
-            goodresp.append(i)
-        else:
-            print(i.text)
+        if i is not None:
+            try:
+                errcode = i.json()["errcode"]
+                if errcode == 10021:
+                    print(i.text)
+                    errurls.append(i.url)
+                if errcode == 10000:
+                    goodresp.append(i)
+                else:
+                    print(i.text)
+            except Exception as e:
+                print(e)
+
     if method == "POST":
         errreqs = [grequests.post(url, session=s) for url in errurls]
     else:
@@ -29,11 +34,11 @@ def checkResend(resp):
 def concurQ(reqs):
     res = []
     while len(reqs) != 0:
-        resp = gt.map(reqs, rate=40)
+        resp = gt.map(reqs, rate=30)
         goodresp, errreqs = checkResend(resp)
         res += goodresp
         reqs = errreqs
         if len(reqs) != 0:
-            time.sleep(0.3)
+            time.sleep(1)
             print("retry")
     return res
