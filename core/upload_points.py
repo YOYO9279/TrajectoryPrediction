@@ -3,14 +3,17 @@ import time
 from math import ceil
 import grequests
 import pandas as pd
+from pandasql import sqldf
+import findspark
+
+findspark.init()
+
 from pyspark.sql import SparkSession
 from tqdm import trange
 from conf.config import *
 from utils.db.df_insert_ignore import save_dataframe
 from utils.req.concur_request import concurQ
 import grequests_throttle as gt
-import findspark
-findspark.init()
 
 pd.set_option('display.max_rows', None)
 
@@ -32,12 +35,20 @@ def upload_track(tid, trid, car_num):
     headers = {"Content-Type": "application/json"}
     uploadTrackURL = f"https://tsapi.amap.com/v1/track/point/upload?key={key}"
 
-    df = spark.sql(f'''
-        SELECT DISTINCT concat_ws(',', cast(map_longitude as STRING), cast(map_latitude as STRING)) as location,
-               gps_time * 1000                                                             as locatetime
-        FROM source
-        WHERE car_number = '{car_num}'
-    ''').toPandas()
+    # df = spark.sql(f'''
+    #     SELECT concat_ws(',', cast(map_longitude as STRING), cast(map_latitude as STRING)) as location,
+    #            gps_time * 1000                                                             as locatetime
+    #     FROM source
+    #     WHERE car_number = '{car_num}'
+    # ''').toPandas()
+    df = sqldf(f'''
+        SELECT  cast(map_longitude as STRING) || ',' || cast(map_latitude as STRING) as location,
+                gps_time * 1000                                                             as locatetime
+         FROM global_sourceDF
+         WHERE car_number = '{car_num}'
+    
+    ''')
+
     page = ceil(df.shape[0] / 99)
     limit = 99
     offset = 99
@@ -69,6 +80,7 @@ def create_upload_track(carDF):
         resp = concurQ(reqs)
         tidList = [i.json()["data"]["results"][0]["tid"] for i in resp]
         tridList = create_track(tidList)
+        time.sleep(1)
 
     for i in trange(len(tidList)):
         upload_track(tidList[i], tridList[i], car_numberList[i])
@@ -91,8 +103,8 @@ def create_track(tidList):
 
 if __name__ == '__main__':
 
-    step = 100000
-    start = 26582601
+    step = 500000
+    start = 37382601
     stop = 108465083
 
     for i in range(start, stop, step):
@@ -105,10 +117,15 @@ if __name__ == '__main__':
             WHERE dt = '2018-10-08' AND rk BETWEEN {i} AND {i + step}
             ''')
 
-        sourceDF.cache().createOrReplaceTempView("source")
-        print(sourceDF.count())
-        source_table_car = spark.sql("SELECT DISTINCT car_number  from source").toPandas()
+        global global_sourceDF
 
+        global_sourceDF = sourceDF.toPandas()
+
+        print(sourceDF.count())
+
+        spark.stop()
+
+        source_table_car = sqldf("SELECT DISTINCT car_number  from global_sourceDF")
 
         source_table_car = create_terminal(source_table_car)
 
@@ -118,6 +135,3 @@ if __name__ == '__main__':
 
         print(f" {i + step} upload over")
 
-        spark.stop()
-
-        time.sleep(3)
