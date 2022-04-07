@@ -1,18 +1,14 @@
-import json
-
-import grequests
+import numpy as np
 import pandas as pd
-from geopy.distance import geodesic
 from pyspark.sql import SparkSession
-from utils.db.df_insert_ignore import save_dataframe
-from utils.geo.coordTransform_utils import gcj02_to_wgs84
 from conf.config import *
-import grequests_throttle as gt
+
+SOURCE_TABLE = "spark.ods_track_rk_geohash"
 
 
 
+CROSSING_TEMP_VIEW = "CROSSINGTEMPVIEW"
 def SinkTransfer():
-    CROSSING_TEMP_VIEW = "CROSSINGTEMPVIEW"
 
     df = pd.read_sql_query(f'select * from {CROSSING_SINK_TABLE}', con=mysqlConn)
     spark.createDataFrame(df).createOrReplaceTempView(CROSSING_TEMP_VIEW)
@@ -22,8 +18,8 @@ def SinkTransfer():
              b.id         as id
         from {SOURCE_TABLE} a
                cross join {CROSSING_TEMP_VIEW} b
-                          on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
-    ''').repartition(100, "car_number").cache().createOrReplaceTempView("coor_car")
+                          on substr(a.geohash,1,8) == substr(b.geohash,1,8)   
+    ''').cache().createOrReplaceTempView("coor_car")
 
     print("coor_car done")
 
@@ -42,14 +38,11 @@ def SinkTransfer():
 
 
 def SinkAdjacent():
-    spark.createDataFrame(
-        pd.read_sql_query(f'select * from {CROSSING_SINK_TABLE}', con=mysqlConn)).createOrReplaceTempView(
-        CROSSING_SINK_TABLE)
 
     curnextDF = spark.sql(
         f'''
                 SELECT *
-                from (SELECT DISTINCT id                                                               as cur,
+                from (SELECT          id                                                               as cur,
                                       lead(id, 1, -1) over (PARTITION BY car_number ORDER BY gps_time) as next
                       from coor_car)
                 where cur != next and next != -1
@@ -58,11 +51,45 @@ def SinkAdjacent():
     print("SinkAdjacent Done")
 
 
+def save_A_Z():
+    global A, A2, A3, Z
+
+    transferDF = pd.read_sql_query(f'select * from {TRANSFER_SINK_TABLE}', con=clickhouseConn)
+    crossingDF = pd.read_sql_query(f'select * from {CROSSING_SINK_TABLE}', con=mysqlConn)
+    adjacentDF = pd.read_sql_query(f'select * from {ADJACENT_SINK_TABLE}', con=clickhouseConn)
+
+    m = crossingDF.last_valid_index() + 2
+    A = np.mat(np.zeros((m, m)))
+    Z = np.mat(np.zeros((m, m)))
+
+    cnt = 0
+    for index, row in transferDF.iterrows():
+        A[int(row['from_id']), int(row['to_id'])] = row['cnt']
+        cnt += row['cnt']
+
+    A = A / cnt
+    A2 = A.dot(A)
+    A3 = A2.dot(A)
+
+    for index, row in adjacentDF.iterrows():
+        Z[int(row['cur']), int(row['next'])] = 1
+        Z[int(row['next']), int(row['cur'])] = 1
+
+    print("save ...")
+    np.save(A_PATH, A)
+    np.save(A2_PATH, A2)
+    np.save(A3_PATH, A3)
+    np.save(Z_PATH, Z)
+
+
+    print("prepare A Z done")
+
+
 if __name__ == '__main__':
     spark = SparkSession.builder.appName("get TranAdj").master("yarn").enableHiveSupport().getOrCreate()
-    spark.udf.register("dist", lambda x1, y1, x2, y2: geodesic((x1, y1), (x2, y2)).m)
+    #
+    # SinkTransfer()
+    #
+    # SinkAdjacent()
 
-
-    SinkTransfer()
-
-    SinkAdjacent()
+    save_A_Z()

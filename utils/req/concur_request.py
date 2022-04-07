@@ -9,7 +9,11 @@ from conf.config import s
 def checkResend(resp):
     errurls = []
     goodresp = []
-    method = resp[0].request.method
+    try:
+        method = resp[0].request.method
+    except Exception as e:
+        print(e)
+        method = 'POST'
     for i in resp:
         if i is not None:
             try:
@@ -34,7 +38,7 @@ def checkResend(resp):
 def concurQ(reqs):
     res = []
     while len(reqs) != 0:
-        resp = gt.map(reqs, rate=30)
+        resp = gt.map(reqs, rate=35)
         goodresp, errreqs = checkResend(resp)
         res += goodresp
         reqs = errreqs

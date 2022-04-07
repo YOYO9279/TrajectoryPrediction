@@ -1,5 +1,6 @@
 from math import ceil
 
+import geohash2
 import grequests
 import pandas as pd
 from pandas import DataFrame
@@ -9,7 +10,8 @@ from conf.config import *
 from utils.geo.coordTransform_utils import gcj02_to_wgs84
 from utils.req.concur_request import concurQ
 
-SINK_TABLE = "spark.ods_track_makeup"
+SINK_TABLE = "spark.ods_track_geohash_makeup"
+
 
 def getMorePoints(counts, tid, trid):
     page = ceil(counts / 999)
@@ -22,9 +24,9 @@ def getMorePoints(counts, tid, trid):
 
     return points
 
-def sinkPoints():
 
-    car_infoDF = pd.read_sql_query(f'select * from {CARINFO_TABLE}', con=mysqlConn)
+def sinkPoints():
+    car_infoDF = pd.read_sql_query(f'select * from {CARINFO_TABLE} WHERE id < 1000', con=mysqlConn)
 
     tidL = []
     tridL = []
@@ -59,23 +61,27 @@ def sinkPoints():
         gps_latitudeL += [
             gcj02_to_wgs84(float(str(i["location"]).split(",")[0]), float(str(i["location"]).split(",")[1]))[1] for i in
             points]
+
         tidL += [oritidL[n] for x in range(len(points))]
         tridL += [oritridL[n] for x in range(len(points))]
         car_numL += [oricar_numL[n] for x in range(len(points))]
         gps_timeL += [x for x in range(len(points))]
         n = n + 1
 
+    geohash_list = [geohash2.encode(lat, long) for lat, long in zip(map_latitudeL, map_longitudeL)]
+
     res = {"map_longitude": map_longitudeL,
            "map_latitude": map_latitudeL,
            "gps_longitude": gps_longitudeL,
            "gps_latitude": gps_latitudeL,
            "car_number": car_numL,
+           "geohash": geohash_list,
            "tid": tidL,
            "trid": tridL,
            "gps_time": gps_timeL}
-    resDF = DataFrame(res).drop_duplicates(['car_number', 'map_longitude', 'map_latitude'])
+    resDF = DataFrame(res)
     print(resDF)
-    spark.createDataFrame(resDF).write.mode("append").saveAsTable(SINK_TABLE)
+    spark.createDataFrame(resDF).write.mode("overwrite").saveAsTable(SINK_TABLE)
 
 
 if __name__ == '__main__':

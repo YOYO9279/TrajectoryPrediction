@@ -1,36 +1,26 @@
 import time
 import numpy as np
 import pandas as pd
-from geopy.distance import geodesic
 from pyspark.sql import SparkSession
 from tqdm import tqdm
 
 from conf.config import *
+from utils.pusher.wx import wx_reminder
+
+np.set_printoptions(threshold=np.inf)
 
 
-def PrepareData():
+def get_data_from_local():
     global A, A2, A3, Z
-    transferDF = pd.read_sql_query(f'select * from {TRANSFER_SINK_TABLE}', con=clickhouseConn)
+
+    A = np.load(A_PATH+".npy")
+    A2 = np.load(A2_PATH+".npy")
+    A3 = np.load(A3_PATH+".npy")
+    Z = np.load(Z_PATH+".npy")
     crossingDF = pd.read_sql_query(f'select * from {CROSSING_SINK_TABLE}', con=mysqlConn)
-    adjacentDF = pd.read_sql_query(f'select * from {ADJACENT_SINK_TABLE}', con=clickhouseConn)
     spark.createDataFrame(crossingDF).createOrReplaceTempView(CROSSING_SINK_TABLE)
+    print("get data done")
 
-    m = crossingDF.last_valid_index() + 2
-    A = np.mat(np.zeros((m, m)))
-    Z = np.mat(np.zeros((m, m)))
-
-    cnt = 0
-    for index, row in transferDF.iterrows():
-        A[int(row['from_id']), int(row['to_id'])] = row['cnt']
-        cnt += row['cnt']
-
-    A = A / cnt
-    A2 = A.dot(A)
-    A3 = A2.dot(A)
-
-    for index, row in adjacentDF.iterrows():
-        Z[int(row['cur']), int(row['next'])] = 1
-        Z[int(row['next']), int(row['cur'])] = 1
 
 
 def getPrecurnextDF(i):
@@ -39,9 +29,9 @@ def getPrecurnextDF(i):
                 SELECT a.car_number as car_number,
                             a.gps_time   as gps_time,
                            b.id         as id
-                    from (select * from {SOURCE_TABLE} order by car_number limit {i}) a
+                    from (select * from {CALC_SOURCE_TABLE} WHERE dt = '2018-10-08'limit {i}) a
                              cross join {CROSSING_SINK_TABLE} b
-                   on dist(a.gps_latitude, a.gps_longitude, b.gps_latitude, b.gps_longitude) < {CROSSING_DISTANCE}
+                   on substr(a.geohash,1,8) == substr(b.geohash,1,8)
     """).createOrReplaceTempView("tt")
 
     precurnextDF = spark.sql(
@@ -77,9 +67,6 @@ def getPrecurnextDF(i):
     return precurnextDF
 
 
-
-
-
 def DoCalc(precurnextDF, i, a, b, c):
     curL = []
     pre1L = []
@@ -91,21 +78,21 @@ def DoCalc(precurnextDF, i, a, b, c):
     N = 0
     for index, row in tqdm(precurnextDF.iterrows(), total=precurnextDF.shape[0]):
 
-        S = A[row['pre1']] * 0.6 + A2[row['pre2']] * 0.3 + A3[row['pre3']] * 0.1
+        S = A[row['pre1']] * a + A2[row['pre2']] * b + A3[row['pre3']] * c
 
         S = np.multiply(S, Z[row['cur']])
 
-        predict = np.argmax(S, axis=1)
+        predict = np.argmax(S)
 
-        if int(predict[0]) != 0:
+        if predict != 0:
             pre1L.append(int(row['pre1']))
             pre2L.append(int(row['pre2']))
             pre3L.append(int(row['pre3']))
             curL.append(int(row['cur']))
             nextL.append(int(row['next']))
-            predictL.append(int(predict[0]))
+            predictL.append(int(predict))
 
-            if int(predict[0]) == int(row['next']):
+            if predict == int(row['next']):
                 Y += 1
             else:
                 N += 1
@@ -121,21 +108,23 @@ def DoCalc(precurnextDF, i, a, b, c):
     curtime = str(time.strftime("%Y%m%d_%H%M%S", time.localtime()))
     correct = str(round(Y / (Y + N) * 100, 2)) + "%"
     saveName = "_".join([curtime, correct, str(i), str(a), str(b), str(c)]) + ".csv"
-    pd.DataFrame(res).to_csv("../res/calc/"+saveName)
+    pd.DataFrame(res).to_csv("../res/calc/" + saveName)
 
     print("Y:" + str(Y))
     print("N:" + str(N))
     print("correct:" + correct)
 
 
+
 if __name__ == '__main__':
-
     spark = SparkSession.builder.appName("calcAccu").master("yarn").enableHiveSupport().getOrCreate()
-    spark.udf.register("dist", lambda x1, y1, x2, y2: geodesic((x1, y1), (x2, y2)).m)
 
-    PrepareData()
-    size = [10000]
-    a, b, c = 0.5, 0.3, 0.2
+    get_data_from_local()
+
+    size = range(100000,500000,100000)
+    a, b, c = 0.6, 0.3, 0.1
     for i in size:
         precurnextDF = getPrecurnextDF(i)
         DoCalc(precurnextDF.toPandas(), i, a, b, c)
+
+    wx_reminder()

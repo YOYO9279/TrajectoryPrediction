@@ -35,12 +35,6 @@ def upload_track(tid, trid, car_num):
     headers = {"Content-Type": "application/json"}
     uploadTrackURL = f"https://tsapi.amap.com/v1/track/point/upload?key={key}"
 
-    # df = spark.sql(f'''
-    #     SELECT concat_ws(',', cast(map_longitude as STRING), cast(map_latitude as STRING)) as location,
-    #            gps_time * 1000                                                             as locatetime
-    #     FROM source
-    #     WHERE car_number = '{car_num}'
-    # ''').toPandas()
     df = sqldf(f'''
         SELECT  cast(map_longitude as STRING) || ',' || cast(map_latitude as STRING) as location,
                 gps_time * 1000                                                             as locatetime
@@ -64,7 +58,7 @@ def upload_track(tid, trid, car_num):
 
         reqs += [grequests.post(url=uploadTrackURL, session=s, data=json.dumps(d), headers=headers, timeout=5)]
     concurQ(reqs)
-    time.sleep(2)
+    time.sleep(0.5)
 
 
 def create_upload_track(carDF):
@@ -88,6 +82,7 @@ def create_upload_track(carDF):
     car_info = {"tid": tidList,
                 "trid": tridList,
                 "car_number": car_numberList}
+    # todo ValueError: arrays must all be same length
     car_infoDF = pd.DataFrame(car_info)
 
     save_dataframe(mysqlConn, car_infoDF, CARINFO_TABLE)
@@ -104,16 +99,17 @@ def create_track(tidList):
 if __name__ == '__main__':
 
     step = 500000
-    start = 37382601
+    start = 46500001
     stop = 108465083
 
     for i in range(start, stop, step):
+        print(f"{i} - {i+step}")
         spark = SparkSession.builder.appName(f"upload Point {i} - {i + step}") \
             .master("yarn").enableHiveSupport().getOrCreate()
 
         sourceDF = spark.sql(f'''
             SELECT map_longitude, map_latitude, gps_time, translate(car_number,".","0")  as car_number
-            FROM {SOURCE_TABLE}
+            FROM {UPLOAD_SOURCE_TABLE}
             WHERE dt = '2018-10-08' AND rk BETWEEN {i} AND {i + step}
             ''')
 

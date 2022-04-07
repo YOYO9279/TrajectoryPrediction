@@ -3,17 +3,26 @@ from requests.adapters import HTTPAdapter
 
 from utils.db.get_conn import getClickhouseConn, getMysqlConn
 
-SOURCE_TABLE = "spark.ods_track_rk"
+UPLOAD_SOURCE_TABLE = "spark.ods_track_rk"
+
+CALC_SOURCE_TABLE = "spark.ods_track_rk_geohash"
 
 # mysql
 CROSSING_SINK_TABLE = "crossing_geohash"
 
 # clickhouse
-TRANSFER_SINK_TABLE = "transfer"
-ADJACENT_SINK_TABLE = "adjacent"
-CARINFO_TABLE = "carinfo"
+TRANSFER_SINK_TABLE = "transfer_geohash_makeup"
+ADJACENT_SINK_TABLE = "new_adj"
+CARINFO_TABLE = "carinfo02"
 
 CROSSING_DISTANCE = 20
+
+suffix = "_makeup01"
+
+A_PATH = "../data/A" + suffix
+A2_PATH = "../data/A2" + suffix
+A3_PATH = "../data/A3" + suffix
+Z_PATH = "../data/Z" + suffix
 
 s = requests.session()
 adapter = requests.adapters.HTTPAdapter(pool_connections=200,
